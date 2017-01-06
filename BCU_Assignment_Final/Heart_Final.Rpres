@@ -1,0 +1,498 @@
+<style>
+.small-code pre code {
+  font-size: 1em;
+}
+.footer {
+    color: black; background: #E8E8E8;
+    position: fixed; top: 90%;
+    text-align:center; width:100%;
+}
+.reveal h1, .reveal h2, .reveal h3 {
+  word-wrap: normal;
+  -moz-hyphens: none;
+}
+.midcenter {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+}
+</style>
+
+Analysis of the Heart Data
+==========================
+author: Aliyu Sambo, Kamau Maina, Julian Hatwell and Paul Carter
+date: 
+autosize: true
+font-import: http://fonts.googleapis.com/css?family=Ubuntu
+font-family: 'Ubuntu'
+
+Introduction
+============
+```{r initial_load, echo=FALSE}
+# load data
+heart <- read.csv("Heart.csv")
+
+# tidy data
+heart <- heart[, -1]
+names(heart)[14] <- "HDisease"
+
+# partition
+set.seed(16)
+n <- nrow(heart)
+index <- sample(n, round(n * 0.7))
+heart.train <- heart[index, ]
+heart.test <- heart[-index, ]
+```
+
+- Why we chose the heart data
+- Exploratory Data Analysis (EDA)
+- Pre-processing
+- Descriptive / Predictive Analyses
+
+EDA Data Summary
+============
+There are `r nrow(heart)` rows and `r ncol(heart)` columns (excluding column X).
+
+<div align="center">
+<img src="figure/heart_summary.png" width=700 height=500>
+</div>
+
+EDA Categorical Variables
+=========================
+
+```{r aliyu_boxplots, echo=FALSE, fig.width=11, fig.height=8}
+par(mfrow=c(2,2))
+boxplot(Chol ~ Sex, data = heart, main="Gender & Chol",col='beige')
+boxplot(MaxHR ~ HDisease, data = heart, col='azure', main="Heart Disease & MaxHR")
+boxplot(Chol ~ HDisease, data = heart,col='aquamarine', main="Heart Disease & Chol")
+boxplot(MaxHR ~ Fbs, data = heart, main="Blood Sugar & MaxHR",col='antiquewhite')
+```
+
+EDA Distribution of numeric vars
+===================================
+
+```{r julian_explore_nums, echo=FALSE, fig.height=4, fig.width=4}
+library(lattice)
+num.vars <- c("Age", "RestBP"
+              , "Chol", "MaxHR"
+              , "Oldpeak", "Ca")
+
+for (var in num.vars) {
+d <- densityplot(~heart.train[[var]]
+                 , xlab = var)
+print(d)
+}
+```
+
+EDA Multivariate Distribution
+=============================
+
+```{r kamau_ggpoint_with_colour, echo=FALSE, fig.width=11, fig.height=8}
+library(ggplot2)
+ggplot(heart, aes(Age, Chol, color = ChestPain)) +
+  geom_point(size=3) + 
+  ggtitle("Chest Pain Relationship To Age and Cholesterol")
+```
+
+Preprocessing
+=============
+1. Drop variable X and rename AtheroscleroticHDisease
+1. Recoding factors
+1. Partition the data into training and test
+1. Handling NA values in Thal variable
+1. Handling NA values in Ca variable
+1. Handling outlier in Chol variable
+1. Handling skew in Oldpeak variable
+1. Scaling numeric variables
+
+NA Values
+=========
+
+```{r paul_na_visualisation, echo=FALSE, fig.width=11, fig.height=8}
+image(is.na(heart.train)
+      , main = "Missing Values"
+      , xlab = "Observation"
+      , ylab = ""
+      , xaxt = "n"
+      , yaxt = "n"
+      , bty = "n"
+      , col = c("cornflowerblue"
+                   , "black")
+                   )
+axis(1, seq(0, 1, length.out = nrow(heart.train))
+     , 1:nrow(heart.train)
+     , col = "white"
+     )
+axis(2, seq(0, 1, length.out = length(names(heart.train)))
+     , names(heart.train)
+     , col = "white"
+     , las = 2)
+```
+
+Handling NA values in Thal variable
+===================================
+
+```{r paul_thal_na}
+library(Hmisc) # impute with mean/mode etc.
+heart.train$Thal <- impute(heart.train$Thal, mode) # mode is "normal"
+```
+
+Handling NA values in Ca variable
+=================================
+
+```{r aliyu_na_ca_before}
+sum(is.na(heart.train$Ca)) # before
+```
+
+Handling NA values in Ca variable
+=================================
+
+```{r aliyu_na_ca_impute_knn}
+library(VIM)
+heart.imputn <- heart.train[!is.na(heart.train$Ca),]
+imputn.rows <- nrow(heart.imputn)
+heart.NA <- heart.train[is.na(heart.train$Ca),]
+heart.imp.NA <- rbind(heart.imputn, heart.NA)
+
+hearttemp <-kNN(heart.imp.NA, "Ca")[,-15]
+
+toputback <- hearttemp[-c(1:imputn.rows), ]
+heart.train <- heart.train[!is.na(heart.train$Ca),]
+heart.train <- rbind(heart.train, toputback)
+```
+
+Handling NA values in Ca variable
+=================================
+```{r aliyu_na_ca_after}
+sum(is.na(heart.train$Ca)) # after
+```
+
+Handling outlier in Chol variable
+=================================
+
+<div class="footer" style="margin-top:-50px;font-size:80%;">
+The Chol data has an outlier that is far removed from the next closest data point. This may have been an input error. It was therefore excluded from the analysis.</div>
+```{r, echo=FALSE}
+library("ggplot2")
+
+cholmax = which.max(heart$Chol)
+heart.clean=heart[-cholmax,]
+
+ggplot(heart, aes(Chol)) +  geom_density(color="red", size=1.25) + ggtitle("Cholesterol Levels With An Outlier")
+```
+***
+```{r, echo=FALSE}
+ggplot(heart.clean, aes(Chol)) +  geom_density(color="red", size=1) + ggtitle("Choleserol Outlier Excluded")
+```
+
+Handling skew in Oldpeak variable
+=================================
+```{r julian_transform_oldpeak, echo=FALSE, fig.height=4, fig.width=4}
+densityplot(~Oldpeak
+            , data = heart.train
+            , main = "Raw")
+densityplot(~sqrt(Oldpeak)
+            , data = heart.train
+            , main = "Square Root")
+library(car)
+lambda <- coef(powerTransform(heart$Oldpeak + 0.1)) # car package, BC power strictly positive, not zero
+densityplot(~I(Oldpeak^lambda)
+            , data = heart.train
+            , main = "Box Cox Power Transform")
+```
+
+We chose square root as it is good enough and easier to explain to non-statisticians.
+
+Predictive and Descriptive Analyses
+===================================
+
+Each team member will now present a summary of their individual investigation
+
+Using Clustering to Investigate the link between Heart Disease and Chest Pain
+============================
+Julian Hatwell
+
+Heart Disease and Chest Pain
+============================
+<div align="center">
+<img src="figure/assoc_stats.png" width=850 height=600>
+</div>
+
+Heart Disease and Chest Pain
+============================
+- Question: Is there an underlying set of metabolic indicators associated with the pattern seen in the symptoms?
+
+- Methodology: Remove the two variables describing the symptoms and use clustering to look for a pattern in the remaining variables.
+
+- $k \in \{2, 4\}$ or dendrogram cut at 2 or 4 nodes makes sense intuitively.
+
+Heart Disease and Chest Pain
+============================
+<div align="center">
+<img src="figure/hclus_and_plots_4.png" width=600 height=600>
+</div>
+
+Heart Disease and Chest Pain
+============================
+<div align="center">
+<img src="figure/hclus_and_plots_5.png" width=600 height=600>
+</div>
+
+Heart Disease and Chest Pain
+============================
+<div align="center">
+<img src="figure/hclus_align_results.png" width=600 height=600>
+</div>
+
+Heart Disease and Chest Pain
+============================
+<div align="center">
+<img src="figure/hclus_diagnostic_table.png" width=700 height=600>
+</div>
+
+Using Clustering to Investigate the link between Blood Sugar and Cholesterol
+=============================
+Kamau Maina
+
+Initial Visualisation
+========================================================
+<div class="footer" style="margin-top:-40px;font-size:80%;">
+To understand the Fasting Blood Sugar date.<br>
+False: Fastin Blood Sugar level below 120 mg/dl<br>
+True: Fasting Blood Sugar level above 120 mg/dl</div>
+```{r, echo=FALSE, fig.align='center'}
+library("fpc")
+library("VIM")
+library("NbClust")
+
+heart.ana = heart.clean[,c(1,2,4,5,6,14)]
+heart.ana$Sex = factor(heart.ana$Sex)
+levels(heart.ana$Sex) = c("Female", "Male")
+heart.ana$Fbs = factor(heart.ana$Fbs)
+levels(heart.ana$Fbs) = c("False", "True")
+
+ggplot(heart.ana, aes(Sex, Chol, color=Fbs)) + geom_point(size=2) + 
+  facet_wrap(~ HDisease) + ggtitle("Data Classes Relationships")
+```
+
+K-Means Clustering
+========================================================
+<div>
+<div align="center">
+<img src="presentation/Heart-figure/KM_CholFbsHDisease.png">
+</div>
+***
+<div align="center">
+<img src="presentation/Heart-figure/KM_CholFbsClust.png">
+</div>
+</div>
+<div class="footer" style="margin-top:-50px;font-size:80%;">
+K-Means clustering clusters the data into different groups as the actual groups. This suggests that there is more that causes heart disease besides the variables at our disposal.
+</div>
+
+
+Hierarchical Clustering
+=======================
+<div align="center">
+<img src="presentation/Heart-figure/KM_CirclizedDendo.png" height 550>
+</div>
+4 selected clusters are colored. Datum are colored by heart disease.
+
+Variable Density Heatmap
+========================
+<div align="center">
+<img src="presentation/Heart-figure/KM_DendoHeatmap.png" height=550>
+</div>
+A heatmap of the density of each unique datum per variable
+
+Prediction of Blood Sugar Levels - a class imbalance problem
+=======================
+Aliyu Sambo
+
+Initial Naive Bayes Predictive Analysis Result
+==============================================
+
+Initial Naive Bayes prediction performance for Fbs (Fasting Blood Sugar) was poor.
+
+<div align="center">
+<img src="ali/AS_NB_1.png" height=450>
+</div>
+
+Initial kNN  Predictive Analysis Result
+=======================================
+
+kNN model prediction for Fbs showed very poor performance and predict all as false.
+
+<div align="center">
+<img src="ali/AS_knn_1.png" height=400>
+</div>
+
+Improvement Efforts
+===================
+
+Feature Selection: The RELIEF and RELIEFCAT algorithms were used to identify features that features that were key.
+
+<div align="center">
+<img src="ali/AS_IMFS_1.png" height=300>
+</div>
+
+Using only key attributes did not give significant difference.
+
+Improvement Efforts (Contd)
+===========================
+
+- Optimising K parameter 
+
+```{R}
+round(sqrt(nrow(heart.train)))
+```
+
+Therefore tried k= c(7, 9, 11, 13, 15, 17, 19). k=13 was used.
+
+- Rescaling of Numeric Attribute
+- Binning of Numeric Attributes and apply knncat (knn categorical)
+
+Identified Main Cause of Poor Performance
+=========================================
+
+'Class Imbalance' of Fbs identified. 
+Ideal for predictive models is close to 50% by 50%.
+
+```{r}
+table(heart$Fbs)
+table(heart$HDisease)
+```
+
+Solution
+========
+There are two class imbalance mitigation approaches:
+- Cost function based approaches
+- Sampling based approaches: Oversampling/Undersampling/Hybrid
+
+Oversampling (adding more of the minority class) was implemented using a function in ROSE package.
+
+<div align="left">
+<img src="ali/AS_Os_1.png" height=200>
+</div>
+
+Result After Mitigating for Class Imbalance
+===========================================
+<div align="center">
+<img src="ali/AS_Fin_1.png" height=550>
+</div>
+
+Increasing classifier performance using data categorisation
+==============
+Paul Carter
+
+NaiveBayes with "Raw" Heart Dataset 
+===================================
+<div align="center">
+<img src="PaulPres/Images/paul_confusion.png" width=400 height=500> <br />
+</div>
+
+Categorising Variables 
+======================
+Now let's see if the performance is better with other categorised columns 
+
+- Age from 41 values => 7 (<40, {41-46}, {47-52}, {53-58}, {59-64}, {65-70}, 71+)
+- RestBP from 50 Values => 4 (Low, Ideal, Pre-High & High)
+- Chol from 152 Values => 3 (Desirable, Borderline-High, High)
+- MaxHR from 91 Values => 2 (Average, High)
+
+=========================================================
+
+<div align="center">
+<img src="PaulPres/Images/paul_MaxHR.png" width= 800 height=500>
+</div>
+
+
+Categorising Variables 2
+========================
+
+<div align="center">
+<img src="PaulPres/Images/paul_PieHeart.png" width=400 height=350>
+<img src="PaulPres/Images/paul_PieCat.png" width=400 height=350>
+</div>
+
+- A fully categorised RestBP variable 
+
+
+Analysing NaiveBayes
+====================
+```{r eval=FALSE}
+NBClassifier.alt <- naiveBayes(HDisease ~., data = NBdata3)
+NBClassifier.alt
+```
+<div align="center">
+<img src="PaulPres/Images/paul_NBAge.png" width=1200 height=200>
+</div>
+
+- Those aged between 53-58 are at the highest risk of developing heart disease
+
+Analysing Results 2
+===================
+<div align="center">
+<img src="PaulPres/Images/paul_NBSex.png" width=250 height=100> 
+<img src="PaulPres/Images/paul_NBChestPain.png" width=500 height=100>  
+<img src="PaulPres/Images/paul_NBRestBP.png" width=500 height=100> 
+<img src="PaulPres/Images/paul_NBChol.png" width=500 height=100> 
+<img src="PaulPres/Images/paul_NBMaxHR.png" width=300 height=100> 
+<img src="PaulPres/Images/paul_NBThal.png" width=400 height=100> 
+</div>
+
+
+Categorising Results (NaiveBayes)
+=================================
+
+```{r eval=FALSE}
+```
+
+<div align="center">
+<img src="PaulPres/Images/paul_confusion.png" width=350 height=400>
+<img src="PaulPres/Images/paul_confusion3.png" width=350 height=400>
+</div>
+
+- Decreased Accuracy
+- Higher Sensitivity 
+
+KNN Results 
+===========
+- KNN improved performance against "raw" heart data set (72.1%)
+- However performed worse against NaiveBayes
+
+<div align="center">
+<img src="PaulPres/Images/paul_confusion3.png" width=300 height=400>
+<img src="PaulPres/Images/paul_confusion4.png" width=300 height=400>
+</div>
+
+
+Converting KNN to Integer + Rescaling 
+=====================================
+
+<div align="center">
+<img src="PaulPres/Images/paul_confusion6.png" width=400 height=500>
+</div>
+
+Feature Selection
+=================
+```{r eval=FALSE}
+library(mlbench)
+weights <- chi.squared(HDisease~., KNNdata3)
+print(weights)
+```
+
+<div align="center">
+<img src="PaulPres/Images/paul_FeatureSel.png" width=800 height=50>
+</div>
+
+<div align="center">
+<img src="PaulPres/Images/paul_confusion7.png" width=250 height=300>
+</div>
+
+Final Words
+===========
+
+Any Questions?
+
+Thanks for your attention

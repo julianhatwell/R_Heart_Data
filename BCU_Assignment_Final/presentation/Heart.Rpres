@@ -1,0 +1,108 @@
+<style>
+.small-code pre code {
+  font-size: 1em;
+}
+.footer {
+    color: black; background: #E8E8E8;
+    position: fixed; top: 90%;
+    text-align:center; width:100%;
+}
+.reveal h1, .reveal h2, .reveal h3 {
+  word-wrap: normal;
+  -moz-hyphens: none;
+}
+.midcenter {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+}
+</style>
+
+
+'Heart' Data Presentation
+========================================================
+author: Kamau Maina
+date: `r format(Sys.time(), "%d %B, %Y")`
+font-family: 'Helvetica'
+autosize: true
+
+Data Exploration
+========================================================
+class: small-code
+``` {r, echo=FALSE}
+library("lattice")
+library("fpc")
+library("VIM")
+library("ggplot2")
+library("NbClust")
+heart=read.csv("Heart.csv")
+heart=heart[,-1]
+names(heart)[14] = "HDisease"
+summary(heart)
+```
+
+A Closer Look at Cholesterol Data
+========================================================
+<div class="footer" style="margin-top:-50px;font-size:80%;">
+The Chol data has an outlier that is far removed from the next closest data point. This may have been an input error. It was therefore excluded from the analysis.</div>
+```{r, echo=FALSE}
+cholmax = which.max(heart$Chol)
+heart.clean=heart[-cholmax,]
+
+ggplot(heart, aes(Chol)) +  geom_density(color="red", size=1.25) + ggtitle("Cholesterol Levels With An Outlier")
+```
+***
+```{r, echo=FALSE}
+ggplot(heart.clean, aes(Chol)) +  geom_density(color="green", size=1) + ggtitle("Choleserol Outlier Excluded")
+```
+
+Initial Visualisation
+========================================================
+<div class="footer" style="margin-top:-40px;font-size:80%;">
+To understand the Fasting Blood Sugar date.<br>
+False: Fastin Blood Sugar level below 120 mg/dl<br>
+True: Fasting Blood Sugar level above 120 mg/dl</div>
+```{r, echo=FALSE, fig.align='center'}
+heart.ana = heart.clean[,c(1,2,4,5,6,14)]
+heart.ana$Sex = factor(heart.ana$Sex)
+levels(heart.ana$Sex) = c("Female", "Male")
+heart.ana$Fbs = factor(heart.ana$Fbs)
+levels(heart.ana$Fbs) = c("False", "True")
+
+ggplot(heart.ana, aes(Sex, Chol, color=Fbs)) + geom_point(size=2) + 
+  facet_wrap(~ HDisease) + ggtitle("Data Classes Relationships")
+```
+
+K-Means Clustering
+========================================================
+<div>
+<div align="center">
+<img src="presentation/Heart-figure/KM_CholFbsHDisease.png">
+</div>
+***
+<div align="center">
+<img src="presentation/Heart-figure/KM_CholFbsClust.png">
+</div>
+</div>
+<div class="footer" style="margin-top:-50px;font-size:80%;">
+K-Means clustering clusters the data into different groups as the actual groups. This suggests that there is more that causes heart disease besides the variables at our disposal.
+</div>
+
+
+Hierarchical Clustering
+========================================================
+<div>
+<div align="center">
+<img src="presentation/Heart-figure/KM_CirclizedDendo.png" height 550>
+</div>
+4 selected clusters are colored. Datum are colored by heart disease 
+</div>
+
+Variable Density Heatmap
+========================================================
+<div>
+<div align="center">
+<img src="presentation/Heart-figure/KM_DendoHeatmap.png" height=550>
+</div>
+A heatmap of the density of each unique datum per variable
+</div>

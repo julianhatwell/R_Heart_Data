@@ -1,0 +1,442 @@
+<<prologue, include=FALSE>>=
+knitr::opts_chunk$set(warning = FALSE
+                      , message = FALSE
+                      , echo = FALSE
+                      )
+knitr::opts_template$set(
+  fig.tile = list(fig.height = 4
+                  , fig.width = 4
+                  , fig.align='center')
+  )
+
+# libraries
+library(xtable) # pretty tables
+library(vcd) # categorical data analysis and advanced mosaic plots
+library(lattice) # nicer than base plots
+library(ape) # advanced dendrograms for coloured leaf labels
+
+# nice pallette for plots
+niceColors <- c("#CDB380", "#036564", "#EB6841", "#EB68F0", "#999999")
+# superpose line colours for lattice
+niceColors.lines <- list(superpose.line = list(
+  col = niceColors))
+
+heart <- read.csv("Heart.csv")
+@
+
+\documentclass{article}
+
+\begin{document}
+
+\title{Data Analysis Module Assignment}
+\author{Julian Hatwell}
+\maketitle
+<<preprocessing>>=
+# data is loaded as heart
+
+# tidy data. Rename long var name and remove ID column X
+names(heart) <- c(names(heart)[1:14], "HDisease")
+heart <- heart[, -1]
+
+# Apply the four transformations identified by team
+# NA Ca
+library(VIM)
+hearttemp <-kNN(heart, "Ca")
+heart <- hearttemp[,1:14]
+
+# NA thal
+heart$Thal[is.na(heart$Thal)] <- names(which.max(table(heart$Thal))) 
+
+# Outlier Chol
+maxChol <- which.max(heart$Chol)
+heart <- heart[-maxChol,]
+
+# Skew Oldpeak
+heart$Oldpeak <- sqrt(heart$Oldpeak)
+
+# Scale the numeric variables
+heart.unscaled <- heart # need this for unscaling later
+
+# get numeric var names
+vars.types <- sapply(heart, class)
+num.vars <- names(vars.types[vars.types %in% c("integer", "numeric")])
+other.vars <- names(vars.types[!(vars.types %in% c("integer", "numeric"))])
+
+library(reshape)
+scaled.vars <- sapply(heart[, num.vars]
+                        , rescaler
+                        , type = "range")
+
+heart <- cbind(heart[, other.vars], scaled.vars)
+@
+
+Student Number: S15142087\newline
+Tutor: Prof. Mohamed Medhat Gaber
+
+\section{Introduction}
+
+This is the individual individual write up of the Data Analysis module assignment. The Heart data set was chosen for reasons outlined in the group presentation; The mix of factor and numeric variables provided a variety of data cleansing challenges and the practical aspects of this data set for medical applications was appealing.\newline
+
+Exploratory analysis of the heart data set reveals very strong evidence of an association between chest pain and heart disease. In simple terms, relatively few patients with heart disease also suffer chest pain and so do not have a constant reminder of their condition. It is hypothesised that they may be less mindful of their risk. It is also hypothesised that there may be metabolic indicators in the data that are associated with the outward symptoms of atherosclerotic heart disease and chest pain. Finding these indicators may provide some additional information about these patients that might be useful in helping them better manage their condition.\newline
+
+Clustering will be used to look for patterns in the other variables of the dataset which might indicate an underlying association. The findings will be considered in the context supporting these patients.
+
+\section{Aims and Objectives}
+\subsection{Aim}
+To determine whether clustering is useful in finding underlying associations or interactions between heart disease, chest pain and the other variables.
+
+\subsection{Objectives}
+\begin{enumerate}
+\item Use two different clustering techniques to mine the Heart data set
+\item Describe any alignment of the clusters with the pattern of association between heart disease and chest pain
+\item Evaluate which of the techniques and tuning parameter settings gives closest alignment to the pattern (if any)
+\item Critically assess the results in the context of a possible medical intervention for heart disease patients who do not feel chest pain
+\end{enumerate}
+
+\section{Exploratory Analysis}
+
+The main exploratory analysis for this investigation has been presented in the group presentation. This section contains some supplementary information relevent to the specific research question.
+
+\subsection{Categorical Variables}
+Using a frequency table, it is possible to see an association between the presence of heart disease and various categories of chest pain, including asymptomatic (no chest pain). See table 1.\newline
+
+For the purpose of this investigation, a new factor variable (sympt) is created from Chest Pain which is coded as either "No" or "Yes" for Chest Pain Symptoms. See table 2.
+
+<<new_chest_var, echo=TRUE>>=
+heart$sympt <- factor(ifelse(heart$ChestPain == "asymptomatic"
+                             , "No", "Yes"))
+@
+
+The frequency table may be visualised as a mosaic plot with Pearson's residuals shading, as in Figure 1. This shows very strong evidence of an association between presence of heart disease and absence of symptoms of chest pain. The research question stems from this evidence and seeks to find any underlying associations in the other variables. These might be thought of as metabolic indicators of the reported symptoms.
+
+<<basic_mosaic_sympt, opts.label='fig.tile', fig.cap="Mosaic plot of heart disease against presence of symptoms of chest pain. Pearson's residuals indicate that there is very strong evidence of an association between the two variables.">>=
+mosaic(table(Chest_Pain = heart$sympt
+      , Heart_Disease = heart$HDisease)
+      , shade = TRUE)
+@
+
+\newpage
+
+<<basic_crosstab, results='asis'>>=
+cat("Table 1: Frequency Table of presence of heart disease\nagainst various types of reported symptoms of chest pain.")
+
+xtable(table(Chest_Pain = heart$ChestPain
+      , Heart_Disease = heart$HDisease))
+
+cat("\nTable 2: Frequency Table of presence of heart disease\nagainst and reported symptoms of chest pain.")
+
+xtable(table(Chest_Pain = heart$sympt
+      , Heart_Disease = heart$HDisease))
+@
+
+\section{Methodology}
+\subsection{General Preprocessing}
+The preprocessing steps outlined in the group presentation have been implemented in the following code chunk and run on the data prior to any further steps described below.
+
+<<preprocessing, eval=FALSE, echo=TRUE>>=
+@
+
+\subsection{Task Specific Pre-Processing}
+There is no need to split the data into train and test sets. Clustering is run on all instances of the data. The idea is to find structures and patterns without reference to a particular class label and there are no predictions against previously unseen samples, as is the case in predictive analytics.\newline
+
+Both the clustering algorithms used for this investigation use distance measures which require all the features to be scaled numeric variables but some of the variables are categorical. Various strategies exist to overcome this problem:
+
+\begin{itemize}
+\item Variations on the algorithms are available that can use categorical variables
+\item Excluding categorical variables from the analysis - this may lead to significant loss of information
+\item Finding ways to recode factors as binary or numeric while still retaining the information
+\end{itemize}
+
+A quick scan of this data set shows that most of the categorical variables have already been coded as binary (0 or 1) or a small ordinal (e.g. $Ca \in\{0,\dots\,3\}$). As this research question suggests removing the Heart Disease and Chest Pain variables before clustering, this only leaves Thal as a categorical variable. Further analysis shows that Thal could feasibly be reduced to a binary (normal or abnormal) as there are only 18 out of 303 $\approx 6\%$ cases in one of the two abnormal categories. Given the minimal effort involved and the rather small loss of information, this is the approach taken. Further work might involve comparing results from this investigation with the extended algorithms.
+
+<<fix_thal_var, echo=TRUE>>=
+heart$Thal <- ifelse(heart$Thal == "normal", 0, 1)
+@
+
+After that, it is simply a case of creating an experimental data set by removing the Heart Disease, Chest Pain and Chest Pain Symptoms variables.
+
+<<create_custering_set, echo=TRUE>>=
+rm.cols <- which(names(heart) %in% c("HDisease"
+                                     , "ChestPain"
+                                     , "sympt"))
+heartx <- heart[, -rm.cols]
+@
+
+\subsection{Clustering analysis with k-means}
+The k-means algorithm requires the researcher to set a value for k. It is useful to refer back to the research question when considering a reasonable base value or values. As the research question is characterised by a 2*2 frequency table, the parameter value $k \in \{2, 4\}$ is a good candidate for a first cut.
+
+<<km_custering_code, echo=TRUE>>=
+set.seed(2016)
+
+K <- c(2, 4)
+
+km <- list()
+for (k in K) {
+  km[[k]] <- kmeans(heartx , centers = k)
+}
+@
+
+\subsection{Hierarchical Clustering Analysis}
+
+Hierarchical Agglomerative Clustering also is attempted with the data. The algorithm is run for each of the following 4 methods and initially examined at the 2nd and 4th nodes:
+
+\begin{enumerate}
+\item Centroid
+\item Average
+\item Complete
+\item Single
+\end{enumerate}
+
+<<hclust_code, echo=TRUE>>=
+heartx.hclus1 <- hclust(dist(heartx)
+                        , method="centroid")
+heartx.hclus2 <- hclust(dist(heartx)
+                        , method="average")
+heartx.hclus3 <- hclust(dist(heartx)
+                        , method="complete")
+heartx.hclus4 <- hclust(dist(heartx)
+                        , method="single")
+@
+
+\subsection{Analysis of Clustering Outputs}
+The clustering outputs are tabulated and various types of plots are produced to assess the results visually and statistically.\newline
+
+Dendrograms are visually assessed by plotting, per method, per colouring scheme (Heart Disease and Chest Pain Symptoms variables from the original data set) and cutting the tree at various levels to identify a good separation between areas of generally uniform colour. See Figures 2, 3 \& 4.\newline
+
+Parallel coordinates plots are useful for assessing the separation between clusters from their centroids. This is immediately useful for k-means clustering output. H-clust centroids must first be calculated (e.g. by taking the mean of each variable by the instance cluster Id) and then plotted. See Figures 5, 6 \& 7.\newline
+
+Dot plots with jitter are used to identify which clusters are associated with each of the 4 symptom combinations. See Figures 8, 9 \& 10.\newline
+
+Mosaic plots, with Pearson's residual shading provide similar information as the dot plots with the additional benefit of a measure of statistical significance of any associations. See Figures 11, 12 \& 13.
+
+\section{Results}
+A large number of models were created but many did not provide useful results. This section contains only the results from the models that appear to best answer the research question.
+
+\subsection{H-clust Choice of Model}
+In all the resulting dendrograms, the label colours of the leaf level eventually show some alignment with the symptoms in the original data set. However, the most satisfactory result with the smallest number of splits is using the "average" method with the split at the 5th node. One cluster contains most of the leaf nodes of one colour and the other 4 contain leaves mostly of the second colour. See Figures 2, 3 \& 4.
+
+\subsection{Tabulated Cluster Centroids}
+The cluster centroid values for the k-means algorithm are listed in Tables 3 \& 4.\newline
+
+In addition, the cluster centroids for the hierarchical clusters are calculated as the mean for each variable per cluster. These results are also presented below. See Table 5.
+
+<<hclust_centroids, echo=TRUE>>=
+hclust.final <- cutree(heartx.hclus2, 5)
+
+clusterMeans <- function(x) {
+  tapply(x, hclust.final, mean)
+}
+hclust.centroids <- sapply(heartx, clusterMeans)
+@
+
+<<centroid_results, results='asis'>>=
+cat("\nTable 3: Cluster centroids for k-means, k=2")
+xtable(km[[2]]$centers)
+
+cat("\nTable 4: Cluster centroids for k-means, k=4")
+xtable(km[[4]]$centers)
+
+cat("\nTable 5: Cluster centroids for Hclust Average method, level 5")
+xtable(hclust.centroids)
+@
+
+The information in these tables is more easily visualised in a parallel coordinates plot, which can be found in the Appendix. See Figures 5, 6 \& 7.\newline
+
+\newpage
+
+Based on the visual analysis, clusters have been found that cover the various symptom combinations defined in the research question:\newline
+
+\textbf{k-means ($k=2$) Model:}
+\begin{itemize}
+\item Cluster 1, Heart Disease Yes, Symptoms No, Strong Association
+\item Cluster 2, Heart Disease No, Symptoms Yes, Strong Association
+\end{itemize}
+
+\textbf{k-means ($k=4$) Model:}
+\begin{itemize}
+\item Cluster 1, Heart Disease No, Symptoms Yes, Strong Association
+\item Cluster 2, No Association
+\item Cluster 3, Heart Disease Yes, Symptoms No, Strong Association
+\item Cluster 4, Heart Disease Yes, Symptoms No, Strong Association
+\end{itemize}
+
+\textbf{Hclust, Average Linkage, 5 Nodes Model:}
+\begin{itemize}
+\item Cluster 1, Heart Disease Yes, Symptoms No, Strong Association
+\item Cluster 2, Heart Disease Yes, Symptoms No, Weak Association
+\item Cluster 3, Heart Disease Yes, Symptoms No, Strong Association
+\item Cluster 4, Heart Disease No, Symptoms Yes, Strong Association
+\item Cluster 5, Heart Disease Yes, Symptoms No, Strong Association, Very Small Group
+\end{itemize}
+
+\section{Discussion}
+Returning to the research question, the ideal model will provide a distinct metabolic profile that provides new information on patients with Atherosclerotic Heart Disease but no symptoms of chest pain. The best possible outcome is for this profile to yield some medically useful insight. In this context, each of the models described in the previous section has their pros and cons.\newline
+
+\textbf{k-means ($k=2$) Model:}\newline
+\textbf{Cons:} This appears to be an oversimplification. Lack of model flexibility and may not provide adequate separation of true clusters. It is not possible to correctly model the 2*2 table which characterises the research question, leading to a higher risk of false positives and false negatives. See Figure 9.\newline
+\textbf{Pros:} This is the simplest model and therefore easy to interpret. There is good separation between the clusters on 6 out of 12 variables.\newline
+
+\textbf{k-means ($k=4$) Model:}\newline
+This is possibly the least satisfactory model. There are two clusters (3 \& 4) of interest which are broadly similar and somewhat separable from the other two in a few variables (Thal, MaxHR, ExAng, Oldpeak, Slope). However, Clusters 2 is noisy; It is not associated with the symptoms symptoms in any way and is spread over all four quadrants of the 2*2 table. This will make diagnosis and intervention less reliable. See Figures 10 \& 13.\newline
+
+\textbf{Hclust, Average Linkage, 5 Nodes Model:}\newline
+\textbf{Cons:} The one really useful cluster is actually the opposite of the pattern of interest, so the model is a bit herder to interpret. Medical practitioners have to identify patients of interest by exclusion from this group.\newline
+\textbf{Pros:} This one cluster separates well from all the others, scoring significantly higher or lower than the other 4 clusters on 5 variables. Using thresholds on these 5 in combination with specific scores on some of the other variables provides the potential to clearly distinguish these patients in a way that is not possible with a 2 cluster model. It is especially useful that this one cluster covers all 3 quadrants of the 2*2 table that are not of interest. See Figure 8.\newline
+
+In order to interpret these results, a reverse of the scaling operation must be carried out on the cluster centroids, so their values are restored to the same scale as the original variables. A set of diagnostic rules could then be generated in flow-chart or decision tree format for use by a medical practitioner. See Table 6.
+
+<<compact_and_unscale, echo=TRUE>>=
+unscale <- function(x, name_x) {
+    if (name_x %in% c("Sex", "Fbs", "ExAng", "Thal")) {
+      x <- round(x)
+    } else {
+      x <- x * sum(range(heart.unscaled[[name_x]])) + 
+      min(heart[[name_x]])
+    }
+}
+
+centroids.unscaled <- 
+    mapply(unscale
+           , hclust.centroids[4, ]
+           , names(hclust.centroids[4, ]))
+@
+
+<<diagnostic_tool, results='asis'>>=
+cat("Table 6: Possible diagnostic tool based on the profile of Hclust 4.")
+remarks <- c(
+  "Not equal to"
+  , "Greater than"
+  , "May be male or female"
+  , "Greater than"
+  , "Greater than"
+  , "1 is high risk"
+  , "Generally less than"
+  , "Less than"
+  , "1 is high risk"
+  , "Square root is greater than"
+  , "Greater than 1 is high risk"
+  , "Greater than"
+)
+xtable(cbind(remarks, "Typical Values" = round(centroids.unscaled)))
+@
+
+\newpage
+
+\section{Conclusions}
+From the exploratory analysis of the Heart data set, it was determined that there was a strong association between the presence of Atherosclerotic Heart Disease and a lack of any symptoms of chest pain, despite chest pain being commonly reported by other patients in the database.\newline
+
+Clustering was used on the dataset, excluding the symptomatic indicators, to determine whether there was some underlying association or pattern. Hierarchical clustering with various linkage methods was tried, as well as k-means with different values for k. The Hierarchical model with average linkage yielded good initial results as did the two k-means cluster models.\newline
+
+A critical evaluation of the three candidate models determined that the preferred model to use in medical practice would be to extract cluster 4 from the final Hierarchical model and identify patients of interest by lack of fit with this specific  profile. It is hoped that some useful preventative medical intervention can be developed from this new information.
+
+\section{Appendix}
+\subsection{Figures}
+<<hclus_plot_function>>=
+hclusPlot <- function(x, n, df, colourBy) {
+    clus <- cutree(x, n)
+  labelColours <- niceColors[factor(df[[colourBy]])]
+
+  # phylogenic tree plot
+    plot(as.phylo(x)
+       , direction = "downwards"
+       , tip.color = labelColours
+       , main = paste(x$method, "method\nlabels by" , colourBy)
+       , sub = paste("Node splits =", n))
+    rect.hclust(x, k=n, border = "red")
+}
+caption.labels <- c("Heart Disease.", "Chest Pain Symptoms.", "Heart Disease.")
+leaf.labels <- c("HDisease", "sympt", "HDisease")
+node.splits <- c(5, 5, 4)
+@
+
+<<hclus_and_plots, opts.label='fig.tile', fig.cap=paste("A selection of Cluster Dendrogram from the Heart data. Red lines indicate tree cut level. Label colours by", caption.labels, "The best separation is achieved by the Average method with 5 clusters.")>>=
+
+for (i in 1:3) {
+hclusPlot(heartx.hclus2
+           , node.splits[i]
+           , heart
+           , leaf.labels[i])
+}
+@
+
+<<hc_pp_plot, opts.label='fig.tile', fig.cap="Parallel co-ordinates plot for centroids calculated at hclust node 5, showing values for the mean of each variable per cluster.">>=
+parallelplot(~hclust.centroids
+             , common.scale = TRUE
+             , main = "Centroids for hclust\naverage method with 5 nodes"
+             , par.settings = niceColors.lines)
+
+@
+
+<<km_pp_plots, opts.label='fig.tile', fig.cap=paste("Parallel co-ordinates plot for k =", K, "showing values of each variable for the cluster centroids.")>>=
+for (k in K) {
+  pp <- parallelplot(~km[[k]]$centers
+             , common.scale = TRUE
+             , main = paste("Centroids for k =", k)
+             , par.settings = niceColors.lines)
+  print(pp)
+}
+@
+
+<<hclus_align_results, fig.cap="Final Hierarchical Cluster model alignment with symptoms.", opts.label='fig.tile'>>=
+labelColours <- niceColors[hclust.final]
+xyplot(sympt~HDisease
+       , data = heart
+       , col = labelColours
+       , pch = 19
+       , cex = 0.5
+       , jitter.x = TRUE
+       , jitter.y = TRUE
+       , amount = 0.33
+       , key = list(
+         text = list(
+           as.character(1:5)
+           , col = niceColors)
+         , space = "right"
+         )
+       , main = "Final Hierarchical Cluster Model\nalignment with symptoms"
+       )
+@
+
+<<km_align_results_4, fig.cap=paste("k-means cluster model alignment with symptoms with k =", K), opts.label='fig.tile'>>=
+for (k in K) {
+  labelColours <- niceColors[km[[k]]$cluster]
+  a <- xyplot(sympt~HDisease
+         , data = heart
+         , col = labelColours
+         , pch = 19
+         , cex = 0.5    
+         , jitter.x = TRUE
+         , jitter.y = TRUE
+         , amount = 0.33
+         , key = list(
+           text = list(
+             as.character(1:k)
+             , col = niceColors[1:k])
+           , space = "right"
+           )
+         , main = paste("k-means Cluster Model ( k =", k, ")\nalignment with symptoms")
+         )
+  print(a)
+}
+@
+
+<<hclust_mosaic, opts.label='fig.tile', fig.cap="Mosaic Plot of the hierarchical cluster model with symptoms">>=
+tab <- with(heart, table(clus = factor(hclust.final), HDisease, sympt))
+
+mosaic(tab, shade = TRUE)
+@
+
+<<km_mosaic, opts.label='fig.tile', fig.cap=paste("Mosaic Plot of the k =", K, "k-means model with symptoms.")>>=
+
+# A mosaic plot with shading provides a more rigorous statistical analysis. Figure 5 shows very strong evidence to support the following associations: 
+tab <- with(heart, table(clus = factor(km[[2]]$cluster), HDisease, sympt))
+
+mosaic(tab, shade = TRUE)
+
+
+tab <- with(heart, table(clus = factor(km[[4]]$cluster), HDisease, sympt))
+
+mosaic(tab, shade = TRUE)
+@
+
+\end{document}
