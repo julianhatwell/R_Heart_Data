@@ -1,0 +1,119 @@
+---
+title: "heart"
+author: "Julian Hatwell"
+date: '`r format(Sys.time(), "%b %Y")`'
+output: html_document
+---
+
+```{r prologue, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE
+                      , message = FALSE
+                      , echo = FALSE
+                      )
+knitr::opts_template$set(
+  fig.wide = list(fig.height = 4.5, fig.width = 8, fig.align='center')
+  , fig.wideX = list(fig.height = 3, fig.width = 9, fig.align='center')
+  , fig.relaxed = list(fig.height = 6, fig.width = 8, fig.align='center')
+  , fig.tile = list(fig.height = 3, fig.width = 3, fig.align='center')
+)
+par(mar = c(4,3,3,1))
+```
+
+```{r initial_load}
+library(readr)
+library(dplyr)
+library(lattice)
+library(ggplot2)
+library(psych)
+library(car)
+library(VIM)
+source("HeartTheme.R")
+
+# load data
+heart <- read.csv("Heart.csv")
+```
+
+# Analysis of Heart Data
+We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease)
+
+## Exploratory Analysis
+There are `r nrow(heart)` rows and `r ncol(heart)` columns.
+
+```{r eda_pass1}
+summary(heart)
+```
+
+### First Pass
+X is an index number column and should be removed. AtheroscleroticHDisease is too much to type, so we will change the name. Several variables are coded as numeric but are factors; Sex, for example. The documentation [here](https://archive.ics.uci.edu/ml/datasets/heart+disease) is informative. These need to be recoded.
+
+```{r recoding, echo = TRUE}
+# recoding
+heart <- heart %>% select(-X) %>%
+  rename(HDisease = AtheroscleroticHDisease) %>%
+  mutate(Sex = factor(ifelse(Sex == 1, "M", "F"))
+         , Fbs = factor(ifelse(Fbs == 1, ">120", "<=120"))
+         , RestECG = factor(ifelse(RestECG == 0, "normal"
+                                   , "abnormal")) # there are only 4 valued at 1
+         , ExAng = factor(ifelse(ExAng == 1, "Yes", "No"))
+         , Slope = factor(ifelse(Slope == 1, "down", "level")) # there few valued at 3
+         , Ca = factor(Ca, ordered = TRUE))
+```
+
+### General Housekeeping
+There is a very small number of missing values, which we would like to impute based on row-wise information. The figure demonstrates that there are no instances that share missingness in both the variables involved. The non-parametric nearest neighbours imputation is a reasonable choice, as it makes no assumptions about the data.
+
+```{r missingness, opts.label='fig.wideX'}
+image(is.na(heart[, c("Ca", "Thal")])
+      , main = "Missing Values"
+      , xlab = ""
+      , ylab = "Ca, Thal"
+      , xaxt = "n"
+      , yaxt = "n"
+      , bty = "n"
+      , col = c(myPal[4]
+                   , myPalDark[5])
+                   )
+```
+
+A kernel density plot of each numeric variables reveals skew and non-normality in the Oldpeak variable. Power transformations are unsuitable because of the prevalence of zero values, so this will be left as is. There is an outlier in the Chol variable. Briefly researching this matter online, it is apparent that a reading of >200 for cholesterol is already considered extremely high and the problematic reading in our dataset is nearly 600.
+
+```{r density_nums, opts.label='fig.wideX'}
+classes <- sapply(heart, function(x) class(x)[1])
+num_vars <- names(classes)[classes %in% c("integer", "numeric")]
+
+for (var in num_vars) {
+d <- densityplot(~heart[[var]]
+                 , xlab = var
+                 , par.settings = myLatticeTheme)
+print(d)
+}
+
+cat("Skew")
+sapply(num_vars, function(x) skew(heart[[x]]))
+```
+
+Our first pass at exploring the data suggests the following actions:
+
+1. Set the outlying Chol value to NA,
+1. Impute missing values for Chol, Ca and Thal,
+1. Scale all the variables between (0,1)
+
+```{r fixes, echo = TRUE}
+# change outlier to missing
+heart$Chol[which.max(heart$Chol)] <- NA
+
+# scale, mind the NA
+for (nv in num_vars) {
+  heart[[nv]] <- (heart[[nv]] + abs(min(heart[[nv]], na.rm = TRUE))) / 
+    (max(heart[[nv]], na.rm = TRUE) + abs(min(heart[[nv]], na.rm = TRUE)))
+}
+
+# imputate missing - VIM package
+heart <- kNN(heart, c("Chol", "Ca", "Thal"), imp_var = FALSE, k=11)
+```
+
+```{r tidy2, opts.label='fig.wideX'}
+cat("Recoded data set")
+summary(heart)
+```
+
