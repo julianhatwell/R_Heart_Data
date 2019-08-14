@@ -24,6 +24,7 @@ library(readr)
 library(dplyr)
 library(lattice)
 library(ggplot2)
+library(vcd)
 library(psych)
 library(car)
 library(VIM)
@@ -80,6 +81,7 @@ A kernel density plot of each numeric variables reveals skew and non-normality i
 ```{r density_nums, opts.label='fig.wideX'}
 classes <- sapply(heart, function(x) class(x)[1])
 num_vars <- names(classes)[classes %in% c("integer", "numeric")]
+cat_vars <- names(classes)[!(classes %in% c("integer", "numeric"))]
 
 for (var in num_vars) {
 d <- densityplot(~heart[[var]]
@@ -117,3 +119,78 @@ cat("Recoded data set")
 summary(heart)
 ```
 
+### Bivariate Distributions
+We would now like to determine which variables might be good predictors of atherosclerotic heart disease and which features may be interacting.
+
+```{r splomming, opts.label='fig.relaxed'}
+trel <- myLatticeTheme
+trel$plot.symbol$col <- myPal[1]
+splom(~heart[num_vars] | HDisease
+      , data = heart
+      , diag.panel = function(x, ...){
+        yrng <- current.panel.limits()$ylim
+        d <- density(x, na.rm=TRUE)
+        d$y <- with(d, yrng[1] + 0.95 * diff(yrng) * y / max(y) )
+        panel.lines(d)
+        diag.panel.splom(x, ...)
+ }
+      , panel = function(x, y, ...){
+        panel.xyplot(x, y, ..., alpha = 0.4)
+        panel.loess(x, y, ..., col = myPalDark[2], lwd = 3)
+      }
+      , main = "Scatterplot Matrix by HDisease Group"
+      , xlab = ""
+      , layout = c(2, 1)
+      , pscales = 0
+      , par.settings = trel)
+```
+
+Careful inspection of the splom shows a clear elevation of Oldpeak in the HDisease = Yes group. There is a potentially interesting interaction between Age and MaxHR: Specifically, MaxHR is more correlated with Age in the HDisease = No group, whereas MaxHR is slightly lower whatever the Age in the HDisease = Yes group. The HDisease = Yes group are formed from a narrower Age band, however. The remaining continuous variables may be less informative.
+
+```{r boxplots, opts.label='fig.wideX'}
+cols <- myPal.rangeDiv(5)
+names(cols) <- num_vars
+  
+myBoxPlots <- function(nv, cv) {
+  fmla <- as.formula(paste(nv, " ~ ", cv))
+  boxplot(fmla, data = heart, col = cols[nv])
+}
+par(mfrow=c(1,5))
+for (cv in cat_vars){
+  for (nv in num_vars) {
+    myBoxPlots(nv, cv)
+  }
+}
+par(mfrow=c(1,1))
+```
+
+A visual instpection of the boxplots indicates that there may be some interaction between Chestpain and the three informative variables identified previously (Age, MaxHR and Oldpeak). This is also true of ExAng (exercise induced angina), Slope, Ca and Thal.
+
+### Multivariate Counts
+Distributions among categorical variables can be assessed according to counts and proportions.
+
+```{r mosaic1, opts.label='fig.tile'}
+fourfold(with(heart, table(HDisease, Sex))
+         , color = myFourFold)
+```
+
+```{r mosaic2, opts.label='fig.relaxed'}
+fourfold(with(heart, table(HDisease, ExAng, ChestPain))
+         , color = myFourFold)
+```
+
+We can see that the presence of atherosclerotic heart disease is significantly associated with males, while a third order interaction exists such that those who are generally free from chest pain but suffer with exercise induced angina have a significant risk of atherosclerotic heart disease.
+
+```{r mosaic3, opts.label='fig.relaxed'}
+mosaic(with(heart, table(HDisease, Slope, Ca, Thal))
+       , gp = shading_hsv
+       , gp_args = list(h = myShading["h", ]
+                        , s = c(0.75, 0)
+                        , v = 1
+                        , lty = 1:2
+                        , line_col = c(myPalDark[5], myPalDark[4])
+                        )
+       )
+```
+
+In this four way analysis, we can see that downward slope is most associated with the HDisease = No group and level slope for HDisease = Yes. Similarly, one or more arteries visible under fluoroscopy (Ca) are most strongly associated with HDisease = Yes. For those with HDisease = Yes and level Slope, a reversible Thal is extremely common, with fixed Thal also being more common than the rest of the sample.

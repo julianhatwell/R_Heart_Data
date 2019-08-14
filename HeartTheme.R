@@ -12,6 +12,17 @@ myPal.rangeDark <- colorRampPalette(c("#FFFFFF", myPalDark[3:1]))
 myPal.rangeDiv <- colorRampPalette(c(myPal[1], "#FFFFFF", myPal[5]))
 myPal.rangeContrasts <- colorRampPalette(c("#FFFFFF", myPalContrasts))
 
+# applied to vcd
+myFourFold <- c(myPal[3], myPalDark[3], myPal[5], myPal[4], myPalDark[5], myPalDark[4])
+
+hex2hsv <- function(x) {
+  rdgrbl <- hex2RGB(x)
+  husava <- rgb2hsv(r = t(rdgrbl@coords))
+  return(husava)
+}
+
+myShading <- cbind(hex2hsv(myPal[4]), hex2hsv(myPal[5]))
+
 # applied to lattice
 myLatticeFont <- list(font = 1, cex = 1, col = myPalDark[2])
 
