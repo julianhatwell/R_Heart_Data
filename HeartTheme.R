@@ -9,7 +9,7 @@ myPalContrasts <- c(myPalDark[1], myPalDark[5], myPal[2], myPal[4]
                     , myPal[1], myPal[5], myPalDark[2], myPalDark[4])
 myPal.range <- colorRampPalette(c("#FFFFFF", myPal[3:1]))
 myPal.rangeDark <- colorRampPalette(c("#FFFFFF", myPalDark[3:1]))
-myPal.rangeDiv <- colorRampPalette(c(myPal[1], "#FFFFFF", myPal[5]))
+myPal.rangeDiv <- colorRampPalette(c(myPalDark[4], "#FFFFFF", myPalDark[5]))
 myPal.rangeContrasts <- colorRampPalette(c("#FFFFFF", myPalContrasts))
 
 # applied to vcd

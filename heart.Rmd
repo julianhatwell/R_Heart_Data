@@ -14,16 +14,19 @@ knitr::opts_template$set(
   fig.wide = list(fig.height = 4.5, fig.width = 8, fig.align='center')
   , fig.wideX = list(fig.height = 3, fig.width = 9, fig.align='center')
   , fig.relaxed = list(fig.height = 6, fig.width = 8, fig.align='center')
+  , fig.bigtile = list(fig.height = 5, fig.width = 5, fig.align='center')
   , fig.tile = list(fig.height = 3, fig.width = 3, fig.align='center')
 )
 par(mar = c(4,3,3,1))
 ```
 
 ```{r initial_load}
+library(knitr)
 library(readr)
 library(dplyr)
 library(lattice)
 library(ggplot2)
+library(corrplot)
 library(vcd)
 library(psych)
 library(car)
@@ -35,9 +38,55 @@ heart <- read.csv("Heart.csv")
 ```
 
 # Analysis of Heart Data
-We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease)
+
+## Introduction
+We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease). This data set can be used for demonstrating classification methods. The target variable is usually AtheroscleroticHDisease, which indicates the presence or absence of pathologies of the blood vessels that supply the heart muscle itself. We will do something slightly different here and attempt to use unsupervised methods to detect patterns in the independent variables, and then look for associations with heart disease in order to inform a clinical desision support system (CDSS). A CDSS is essentially a scoring system used by clinicians and medical practitioners to aid with diagnosis.
+
+## Analytic Strategy
+We will proceed in two phases:
+
+1. An initial exploratory analysis
+    1. to assess the data quality and perform any necessary cleansing.
+    1. develop an intiution of the distributions and interactions between variables. This will comprise of visual analytics with density plots, box plots, fourfold plots and mosaic plots.
+1. We will compare various unsupervised learning methods:
+    1. Various matrix decomposition methods, including PCA, Correspondence Analysis and Exploratory Factor Analysis
+    1. Clustering methods, including hierarchical and distance based methods.
+1. We will conclude by developing heuristics (rules of thumb) based on the earlier results to aid with medical diagnostics
 
 ## Exploratory Analysis
+The data dictionary provides the following information:
+
+```{r variables}
+variables_df <- data.frame(name = c("AtheroscleroticHDisease"
+                                    , "Age", "Sex", "ChestPain"
+                                    , "RestBP", "Chol", "Fbs"
+                                    , "RestECG", "MaxHR"
+                                    , "ExAng", "Oldpeak"
+                                    , "Slope", "Ca", "Thal")
+                           , type = c("factor", "integer"
+                                      , "factor", "factor"
+                                      , "integer", "integer"
+                                      , "factor", "factor"
+                                      , "integer", "factor"
+                                      , "factor", "factor"
+                                      , "small integer", "factor")
+                           , notes = c("Presence of heart disease"
+                                       , "Age in years", ""
+                                       , "Presence/type of chest pain"
+                                       , "Resting blood pressure mm Hg"
+                                       , "Serum cholesterol mg/dl"
+                                       , "Fasting blood sugar"
+                                       , "Resting electrocardiograph results"
+                                       , "Maximum heart rate during exercise"
+                                       , "Exercise induced angina"
+                                       , "ST depression exercise relative to rest"
+                                       , "Slope of peak ST exercise segment"
+                                       , "Number of major vessels under fluoroscopy"
+                                       , "No description given"
+                                       ))
+kable(variables_df)
+```
+
 There are `r nrow(heart)` rows and `r ncol(heart)` columns.
 
 ```{r eda_pass1}
@@ -94,6 +143,8 @@ cat("Skew")
 sapply(num_vars, function(x) skew(heart[[x]]))
 ```
 
+Values of skew >1 are severe. The reading for Chol is a result of the outlier. Oldpeak is evidently not normally distributed, and the range is not very large. There is no reason to transform this variable.
+
 Our first pass at exploring the data suggests the following actions:
 
 1. Set the outlying Chol value to NA,
@@ -121,6 +172,17 @@ summary(heart)
 
 ### Bivariate Distributions
 We would now like to determine which variables might be good predictors of atherosclerotic heart disease and which features may be interacting.
+
+```{r corrplotting, opts.label='fig.bigtile'}
+corrplot(cor(heart[num_vars]), order="AOE", type="upper"
+        , col = myPal.rangeDiv(10)
+        , tl.pos="d", tl.cex = 1, tl.col = myPalDark[1]
+        , method = "number", number.cex = 1.5)
+corrplot(cor(heart[num_vars]), add=TRUE, type = "lower"
+        , col = myPal.rangeDiv(10)
+        , method = "ellipse", order = "AOE", diag = FALSE
+        , tl.pos="n", cl.pos = "n")
+```
 
 ```{r splomming, opts.label='fig.relaxed'}
 trel <- myLatticeTheme
@@ -164,10 +226,10 @@ for (cv in cat_vars){
 par(mfrow=c(1,1))
 ```
 
-A visual instpection of the boxplots indicates that there may be some interaction between Chestpain and the three informative variables identified previously (Age, MaxHR and Oldpeak). This is also true of ExAng (exercise induced angina), Slope, Ca and Thal.
+A visual instpection of the boxplots indicates that there may be some interaction between Chestpain and the three informative variables identified previously (Age, MaxHR and Oldpeak). This is also true of ExAng (exercise induced angina), Slope, Ca and Thal. We will not perform any statistical tests at this stage. It is sufficient to develop this intuition and fishing for p-values with so many tests requires careful attention to the false discovery rate, NS assumptions checking and diagnostics for an unwieldy number of variable combinations.
 
 ### Multivariate Counts
-Distributions among categorical variables can be assessed according to counts and proportions.
+Distributions among categorical variables can be assessed according to counts and proportions. These visualisations implicitly perform significance tests by means of shading residuals.
 
 ```{r mosaic1, opts.label='fig.tile'}
 fourfold(with(heart, table(HDisease, Sex))
@@ -193,4 +255,21 @@ mosaic(with(heart, table(HDisease, Slope, Ca, Thal))
        )
 ```
 
-In this four way analysis, we can see that downward slope is most associated with the HDisease = No group and level slope for HDisease = Yes. Similarly, one or more arteries visible under fluoroscopy (Ca) are most strongly associated with HDisease = Yes. For those with HDisease = Yes and level Slope, a reversible Thal is extremely common, with fixed Thal also being more common than the rest of the sample.
+In this four way analysis, we can see that downward slope is most associated with the HDisease = No group and level slope for HDisease = Yes. Similarly, one or more arteries visible under fluoroscopy (Ca) are most strongly associated with HDisease = Yes. A third order interaction indicates that a combination of level Slope and reversible Thal is very strongly associated with HDisease = Yes, with fixed Thal also being strongly indicative.
+
+## Unuspervised Learning
+We will now conduct a principle components analysis (PCA) on the scaled continuous variables. PCA identifies orthogonal projections of multivariate data that capture most of the variation in the first components.
+
+```{r pca1}
+prcomp(heart[num_vars])
+```
+
+We can see from the output summary that Oldpeak appears to be uncorrelated with the other numeric variables and dominates the first component. It's non-normality may also contribute to result and it interferes with the analysis. We re-run the PCA excluding this variable.
+
+```{r pca2}
+heart_pca <- prcomp(heart[num_vars[num_vars != "Oldpeak"]])
+heart_pca
+summary(heart_pca)
+```
+
+So far, these results are not especially intuitive when compared with the  correlations we identified in the exploratory analysis. For example, Age is negatively correlated with MaxHR, which is reflected in the loading of the first component. However, neither Age nor MaxHR are correlated with Chol, yet Chol is also strongly loaded onto the first component. It seems that the projection of four numeric features onto two or three less interpretable principal components does not offer any obvious gains.
