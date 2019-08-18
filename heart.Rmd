@@ -6,22 +6,44 @@ output: html_document
 ---
 
 ```{r prologue, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE
-                      , message = FALSE
-                      , echo = FALSE
-                      )
-knitr::opts_template$set(
+library(knitr)
+opts_chunk$set(warning = FALSE
+              , message = FALSE
+              , echo = FALSE
+              )
+opts_template$set(
   fig.wide = list(fig.height = 4.5, fig.width = 8, fig.align='center')
   , fig.wideX = list(fig.height = 3, fig.width = 9, fig.align='center')
   , fig.relaxed = list(fig.height = 6, fig.width = 8, fig.align='center')
   , fig.bigtile = list(fig.height = 5, fig.width = 5, fig.align='center')
   , fig.tile = list(fig.height = 3, fig.width = 3, fig.align='center')
 )
+
+hook_output <- knit_hooks$get("output")
+knit_hooks$set(output = function(x, options) {
+  lines <- options$output.lines
+  if (is.null(lines)) {
+    return(hook_output(x, options))  # pass to default hook
+  }
+  x <- unlist(strsplit(x, "\n"))
+  more <- "..."
+  if (length(lines)==1) {        # first n lines
+    if (length(x) > lines) {
+      # truncate the output, but add ....
+      x <- c(head(x, lines), more)
+    }
+  } else {
+    x <- c(more, x[lines], more)
+  }
+  # paste these lines together
+  x <- paste(c(x, ""), collapse = "\n")
+  hook_output(x, options)
+})
+
 par(mar = c(4,3,3,1))
 ```
 
 ```{r initial_load}
-library(knitr)
 library(readr)
 library(dplyr)
 library(lattice)
@@ -31,6 +53,7 @@ library(vcd)
 library(psych)
 library(car)
 library(VIM)
+library(ca)
 source("HeartTheme.R")
 
 # load data
@@ -258,6 +281,9 @@ mosaic(with(heart, table(HDisease, Slope, Ca, Thal))
 In this four way analysis, we can see that downward slope is most associated with the HDisease = No group and level slope for HDisease = Yes. Similarly, one or more arteries visible under fluoroscopy (Ca) are most strongly associated with HDisease = Yes. A third order interaction indicates that a combination of level Slope and reversible Thal is very strongly associated with HDisease = Yes, with fixed Thal also being strongly indicative.
 
 ## Unuspervised Learning
+We continue with a more advanced exploration of this data set using various clustering techniques
+
+### PCA
 We will now conduct a principle components analysis (PCA) on the scaled continuous variables. PCA identifies orthogonal projections of multivariate data that capture most of the variation in the first components.
 
 ```{r pca1}
@@ -266,10 +292,74 @@ prcomp(heart[num_vars])
 
 We can see from the output summary that Oldpeak appears to be uncorrelated with the other numeric variables and dominates the first component. It's non-normality may also contribute to result and it interferes with the analysis. We re-run the PCA excluding this variable.
 
-```{r pca2}
+```{r pca2, opts.label='fig.wideX'}
 heart_pca <- prcomp(heart[num_vars[num_vars != "Oldpeak"]])
 heart_pca
 summary(heart_pca)
+plot(heart_pca)
 ```
 
-So far, these results are not especially intuitive when compared with the  correlations we identified in the exploratory analysis. For example, Age is negatively correlated with MaxHR, which is reflected in the loading of the first component. However, neither Age nor MaxHR are correlated with Chol, yet Chol is also strongly loaded onto the first component. It seems that the projection of four numeric features onto two or three less interpretable principal components does not offer any obvious gains.
+So far, these results are not especially intuitive when compared with the  correlations we identified in the exploratory analysis. For example, Age is negatively correlated with MaxHR, which is reflected in the loading of the first component. However, neither Age nor MaxHR are correlated with Chol, yet Chol is also strongly loaded onto the first component. It seems from the cumulative variance measure and the scree plot that the projection of four numeric features onto less interpretable principal components does not offer any obvious gains, because the it still takes three components to capture most of the variance.
+
+### Multiple Correspondence Analysis
+Multiple correspondence analysis is a dimension reduction and clustering analysis for categorical counts. The relationships among several or many categorical variables can be mapped in two dimensions, giving fairly intiuitive results. The most important benefit is that categorical variables are implicitly recoded into non-abritrary numeric values. This makes them available to use in distance-based methods, such as k-means or hierarchical clustering.
+
+```{r mca1, output.lines=10, opts.label='fig.relaxed'}
+heart_mca <- mjca(heart[cat_vars])
+summary(heart_mca)
+plot(heart_mca, map = "symbiplot"
+     , arrows = c(FALSE, TRUE)
+     , mass = c(FALSE, TRUE)
+     , contrib = c("none", "relative")
+     , col = c(myPalDark[5], myPalDark[4]))
+```
+
+The results of this analysis are indeed rather interesting and confirm the findings of the initial explaratory analysis. The plot can be interpreted by identifying attributes that have moved in the same direction from the origin (0, 0), with particular interest in those that have clustered close together. We can see the specific values of ChestPain, Slope, Ca, ExAng and Sex that are associated with the presence of absence of heart diseease. We also have confirmation that Fbs is much less correlated with HDisease and RestECG only moderately correlated. These latter two variables might well be left out of any predictive model. We can re-run this analysis excluding those variables.
+
+```{r mca2, output.lines=11, opts.label='fig.relaxed'}
+heart_mca <- mjca(heart[cat_vars[!cat_vars %in% c("Fbs", "RestECG")]])
+summary(heart_mca)
+plot(heart_mca, map = "symbiplot"
+     , mass = c(FALSE, TRUE)
+     , contrib = c("none", "relative")
+     , col = c(myPalDark[5], myPalDark[4]))
+```
+
+We are not displaying the arrows here because it is hard enough to read the crowded labels. The the clusters are very pronounced and we can identify a handful of less informative attributes. For example, Thal=fixed and ChestPain=typical represent small minorities in the way these variables are distributed. They carry less information or more uncertainty as a result.
+
+We can augment this analysis by discretizing the numeric variables and including them. This will be done by binning into low and high levels.
+
+```{r qbins, echo=TRUE}
+ApplyQuintiles <- function(x, ind) {
+  cut(x, breaks=c(quantile(heart[[ind]], probs = c(0, 0.5, 1))),
+      labels = c("lo", "hi")
+      )
+}
+heart_bins <- cbind(heart[cat_vars[!cat_vars %in% c("Fbs", "RestECG")]] # exclude based on latest findings
+                    , sapply(num_vars
+                            , function(ind) sapply(heart[[ind]]
+                                                   , ApplyQuintiles
+                                                   , ind = ind)))
+```
+
+```{r mca3, output.lines=14, opts.label='fig.relaxed'}
+heart_mca <- mjca(heart_bins)
+summary(heart_mca)
+plot(heart_mca, map = "symmetric"
+     , mass = c(FALSE, TRUE)
+     , contrib = c("none", "relative")
+     , col = c(myPalDark[5], myPalDark[4]))
+```
+
+This plot takes some time to interpret, but a careful look further confirms results of the initial exploratory analysis. The lowest MaxHR values are associated with heart disease and the highest values with absence of disease. Increasing Age is generally associated with presence of heart disease. Increasing Chol is associated, but only very moderately - the different attribute levels are not separated widely on the horizontal dimension. The same is true for RestBP. We might also exclude these last two from a predictive model.
+
+```{r mca4, output.lines=13, opts.label='fig.relaxed'}
+heart_mca <- mjca(heart_bins[names(heart_bins)[!names(heart_bins) %in% c("Chol", "RestBP")]])
+summary(heart_mca)
+plot(heart_mca, map = "symmetric"
+     , mass = c(FALSE, TRUE)
+     , contrib = c("none", "relative")
+     , col = c(myPalDark[5], myPalDark[4]))
+```
+
+We can finish with this multiple correspondence analysis that provides two very well differentiated clusters of attributes. This result gives us plenty of reason to believe that we could infer a diagnostic model from the data set. Because nearly all the inertia (variance) is captured on the first dimension, we can use the one-dimensional coordinate values as numerical proxies for the categorical attributes in the analyses to follow.
