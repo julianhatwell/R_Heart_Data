@@ -421,8 +421,8 @@ cm <- confusionMatrix(factor(km2_clus$cluster, labels = c("No", "Yes")), heart$H
 cm
 ```
 
-We can see that if we assigned unlabelled points to their nearest cluster centroid, we might expect an accuracy of `r cm$overall["Accuracy"]`
-
+We can see that if we assigned unlabelled points to their nearest cluster centroid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
+ 
 ```{r km_diag2}
 
 ```
