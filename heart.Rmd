@@ -15,6 +15,7 @@ opts_template$set(
   fig.wide = list(fig.height = 4.5, fig.width = 8, fig.align='center')
   , fig.wideX = list(fig.height = 3, fig.width = 9, fig.align='center')
   , fig.relaxed = list(fig.height = 6, fig.width = 8, fig.align='center')
+  , fig.hugetile = list(fig.height = 7, fig.width = 7, fig.align='center')
   , fig.bigtile = list(fig.height = 5, fig.width = 5, fig.align='center')
   , fig.tile = list(fig.height = 3, fig.width = 3, fig.align='center')
 )
@@ -54,16 +55,18 @@ library(psych)
 library(car)
 library(VIM)
 library(ca)
+library(factoextra)
+library(caret)
 source("HeartTheme.R")
 
 # load data
 heart <- read.csv("Heart.csv")
 ```
 
-# Analysis of Heart Data
+# Analysis of the UCI Heart Data
 
 ## Introduction
-We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease). This data set can be used for demonstrating classification methods. The target variable is usually AtheroscleroticHDisease, which indicates the presence or absence of pathologies of the blood vessels that supply the heart muscle itself. We will do something slightly different here and attempt to use unsupervised methods to detect patterns in the independent variables, and then look for associations with heart disease in order to inform a clinical desision support system (CDSS). A CDSS is essentially a scoring system used by clinicians and medical practitioners to aid with diagnosis.
+We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease). This data set is often used for demonstrating classification methods. The target variable is usually AtheroscleroticHDisease, which indicates the presence or absence of pathologies of the blood vessels that supply the heart muscle itself. We will do something slightly different here and attempt to use unsupervised methods to detect patterns in the independent variables, and then look for associations with heart disease in order to inform a clinical desision support system (CDSS). A CDSS is essentially a scoring system used by clinicians and medical practitioners to aid with diagnosis.
 
 ## Analytic Strategy
 We will proceed in two phases:
@@ -74,7 +77,8 @@ We will proceed in two phases:
 1. We will compare various unsupervised learning methods:
     1. Various matrix decomposition methods, including PCA, Correspondence Analysis and Exploratory Factor Analysis
     1. Clustering methods, including hierarchical and distance based methods.
-1. We will conclude by developing heuristics (rules of thumb) based on the earlier results to aid with medical diagnostics
+
+We will conclude by developing heuristics (rules of thumb) based on the earlier results to aid with medical diagnostics
 
 ## Exploratory Analysis
 The data dictionary provides the following information:
@@ -126,9 +130,9 @@ heart <- heart %>% select(-X) %>%
   mutate(Sex = factor(ifelse(Sex == 1, "M", "F"))
          , Fbs = factor(ifelse(Fbs == 1, ">120", "<=120"))
          , RestECG = factor(ifelse(RestECG == 0, "normal"
-                                   , "abnormal")) # there are only 4 valued at 1
+                                   , "abnormal")) # there are only 4 valued at 1, we'll reduce to just two levels
          , ExAng = factor(ifelse(ExAng == 1, "Yes", "No"))
-         , Slope = factor(ifelse(Slope == 1, "down", "level")) # there few valued at 3
+         , Slope = factor(ifelse(Slope == 1, "down", "level")) # there few valued at 3, we'll reduce to just two levels
          , Ca = factor(Ca, ordered = TRUE))
 ```
 
@@ -171,21 +175,32 @@ Values of skew >1 are severe. The reading for Chol is a result of the outlier. O
 Our first pass at exploring the data suggests the following actions:
 
 1. Set the outlying Chol value to NA,
-1. Impute missing values for Chol, Ca and Thal,
-1. Scale all the variables between (0,1)
+1. Impute missing values for Chol, Ca and Thal, and
+1. Scale all the variables between [0,1], to support our clustering techniques.
+
+```{r minna}
+minval <- function(x) min(x, na.rm = TRUE)
+maxval <- function(x) max(x, na.rm = TRUE)
+```
+
 
 ```{r fixes, echo = TRUE}
 # change outlier to missing
 heart$Chol[which.max(heart$Chol)] <- NA
 
-# scale, mind the NA
+# scale to [0, 1], my functions exclude the NA
 for (nv in num_vars) {
-  heart[[nv]] <- (heart[[nv]] + abs(min(heart[[nv]], na.rm = TRUE))) / 
-    (max(heart[[nv]], na.rm = TRUE) + abs(min(heart[[nv]], na.rm = TRUE)))
+  if(minval(heart[[nv]]) < 0) {
+    heart[[nv]] <- (heart[[nv]] + abs(minval(heart[[nv]]))) / 
+      (maxval(heart[[nv]]) + abs(minval(heart[[nv]])))  
+  } else {
+    heart[[nv]] <- (heart[[nv]] - minval(heart[[nv]])) / 
+      (maxval(heart[[nv]]) - minval(heart[[nv]]))
+  }
 }
 
-# imputate missing - VIM package
-heart <- kNN(heart, c("Chol", "Ca", "Thal"), imp_var = FALSE, k=11)
+# impute missing - VIM package. Median is the default function.
+heart <- kNN(heart, c("Chol", "Ca", "Thal"), imp_var = FALSE, k=11) 
 ```
 
 ```{r tidy2, opts.label='fig.wideX'}
@@ -249,10 +264,10 @@ for (cv in cat_vars){
 par(mfrow=c(1,1))
 ```
 
-A visual instpection of the boxplots indicates that there may be some interaction between Chestpain and the three informative variables identified previously (Age, MaxHR and Oldpeak). This is also true of ExAng (exercise induced angina), Slope, Ca and Thal. We will not perform any statistical tests at this stage. It is sufficient to develop this intuition and fishing for p-values with so many tests requires careful attention to the false discovery rate, NS assumptions checking and diagnostics for an unwieldy number of variable combinations.
+A visual instpection of the boxplots indicates that there may be some interaction between Chestpain and the three informative variables identified previously (Age, MaxHR and Oldpeak). This is also true of ExAng (exercise induced angina), Slope, Ca and Thal. We will not perform any statistical tests at this stage. It is sufficient to develop this intuition and fishing for p-values with so many tests requires careful attention to the false discovery rate, and assumptions checking and diagnostics for an unwieldy number of variable combinations.
 
 ### Multivariate Counts
-Distributions among categorical variables can be assessed according to counts and proportions. These visualisations implicitly perform significance tests by means of shading residuals.
+Distributions among categorical variables can be assessed according to counts and proportions. The following Fourfold and Mosaic visualisations implicitly perform significance tests by means of shading residuals.
 
 ```{r mosaic1, opts.label='fig.tile'}
 fourfold(with(heart, table(HDisease, Sex))
@@ -284,22 +299,22 @@ In this four way analysis, we can see that downward slope is most associated wit
 We continue with a more advanced exploration of this data set using various clustering techniques
 
 ### PCA
-We will now conduct a principle components analysis (PCA) on the scaled continuous variables. PCA identifies orthogonal projections of multivariate data that capture most of the variation in the first components.
+The first method we will exlore is principle components analysis (PCA) on the scaled continuous variables. PCA identifies orthogonal projections of multivariate data that capture most of the variation in the first components.
 
-```{r pca1}
-prcomp(heart[num_vars])
-```
-
-We can see from the output summary that Oldpeak appears to be uncorrelated with the other numeric variables and dominates the first component. It's non-normality may also contribute to result and it interferes with the analysis. We re-run the PCA excluding this variable.
-
-```{r pca2, opts.label='fig.wideX'}
-heart_pca <- prcomp(heart[num_vars[num_vars != "Oldpeak"]])
+```{r pca1, opts.label='fig.wideX'}
+heart_pca <- prcomp(heart[num_vars], scale. = FALSE)
 heart_pca
 summary(heart_pca)
-plot(heart_pca)
+plot(heart_pca, main = "scree plot for heart pca")
 ```
 
-So far, these results are not especially intuitive when compared with the  correlations we identified in the exploratory analysis. For example, Age is negatively correlated with MaxHR, which is reflected in the loading of the first component. However, neither Age nor MaxHR are correlated with Chol, yet Chol is also strongly loaded onto the first component. It seems from the cumulative variance measure and the scree plot that the projection of four numeric features onto less interpretable principal components does not offer any obvious gains, because the it still takes three components to capture most of the variance.
+We can see from the output summary that Age and Oldpeak are loaded onto PC1 in the opposite direction to MaxHR, indicating a negative correlation. The other PC's can generally be interpreted according to further relationships among these variables, some of which we have already seen in the bivariate correlation analysis. It seems from the cumulative variance measure and the scree plot that the projection of these five numeric features onto less interpretable principal components does not offer any obvious gains, because the it still takes four components to capture most of the variance. Nevertheless, we can make a biplot to better understand the multivariate relationships.
+
+```{r pca2, opts.label='fig.bigtile'}
+biplot(heart_pca
+       , xlim = c(-0.2, 0.2), ylim = c(-0.2, 0.2)
+       , col = c(myPal[2], myPalDark[5]), cex=c(0.5, 1.5))
+```
 
 ### Multiple Correspondence Analysis
 Multiple correspondence analysis is a dimension reduction and clustering analysis for categorical counts. The relationships among several or many categorical variables can be mapped in two dimensions, giving fairly intiuitive results. The most important benefit is that categorical variables are implicitly recoded into non-abritrary numeric values. This makes them available to use in distance-based methods, such as k-means or hierarchical clustering.
@@ -330,7 +345,7 @@ We are not displaying the arrows here because it is hard enough to read the crow
 We can augment this analysis by discretizing the numeric variables and including them. This will be done by binning into low and high levels.
 
 ```{r qbins, echo=TRUE}
-ApplyQuintiles <- function(x, ind) {
+twobins <- function(x, ind) {
   cut(x, breaks=c(quantile(heart[[ind]], probs = c(0, 0.5, 1))),
       labels = c("lo", "hi")
       )
@@ -338,7 +353,7 @@ ApplyQuintiles <- function(x, ind) {
 heart_bins <- cbind(heart[cat_vars[!cat_vars %in% c("Fbs", "RestECG")]] # exclude based on latest findings
                     , sapply(num_vars
                             , function(ind) sapply(heart[[ind]]
-                                                   , ApplyQuintiles
+                                                   , twobins
                                                    , ind = ind)))
 ```
 
@@ -351,15 +366,64 @@ plot(heart_mca, map = "symmetric"
      , col = c(myPalDark[5], myPalDark[4]))
 ```
 
-This plot takes some time to interpret, but a careful look further confirms results of the initial exploratory analysis. The lowest MaxHR values are associated with heart disease and the highest values with absence of disease. Increasing Age is generally associated with presence of heart disease. Increasing Chol is associated, but only very moderately - the different attribute levels are not separated widely on the horizontal dimension. The same is true for RestBP. We might also exclude these last two from a predictive model.
+This plot takes some time to interpret, but a careful look further confirms results of our previous analyses. The lowest MaxHR values are associated with heart disease and the highest values with absence of disease. Increasing Age is generally associated with presence of heart disease. Increasing Chol is associated, but only very moderately - the different attribute levels are not separated widely on the horizontal dimension. The same is true for RestBP. Let us re-run this once more, excluding these less correlated variables. We also exclude the HDisease label as we do not want it to influence the resulting values.
 
 ```{r mca4, output.lines=13, opts.label='fig.relaxed'}
-heart_mca <- mjca(heart_bins[names(heart_bins)[!names(heart_bins) %in% c("Chol", "RestBP")]])
+heart_mca <- mjca(heart_bins[names(heart_bins)[!names(heart_bins) %in% c("Chol", "RestBP", "HDisease")]])
 summary(heart_mca)
-plot(heart_mca, map = "symmetric"
+(res <- plot(heart_mca, map = "symmetric"
      , mass = c(FALSE, TRUE)
      , contrib = c("none", "relative")
-     , col = c(myPalDark[5], myPalDark[4]))
+     , col = c(myPalDark[5], myPalDark[4])))
 ```
 
 We can finish with this multiple correspondence analysis that provides two very well differentiated clusters of attributes. This result gives us plenty of reason to believe that we could infer a diagnostic model from the data set. Because nearly all the inertia (variance) is captured on the first dimension, we can use the one-dimensional coordinate values as numerical proxies for the categorical attributes in the analyses to follow.
+
+```{r mca_coords, echo=TRUE}
+# res is the plot object created by (res <- plot(...))
+coords <- data.frame(res$cols, heart_mca$factors)[-(20:25), ]
+# the last 6 rows are the three continuous vars, and we just want to convert categorical to real valued.
+# We don't need the HDisease feature as we will see how well the clusters match these labels.
+heart_real <- heart[, num_vars[!num_vars %in% c("Chol", "RestBP")]]
+for(c in cat_vars[!cat_vars %in% c("Fbs", "RestECG", "HDisease")]) {
+  heart_real[[c]] <- rep(NA, nrow(heart))
+}
+for(i in 1:nrow(coords)) {
+  fac <- as.character(coords$factor[i])
+  lev <- as.character(coords$level[i])
+  heart_real[[fac]] <- ifelse(heart[[fac]] == lev, coords$Dim1[i], heart_real[[fac]])
+}
+```
+
+## Distance-based Clustering
+Now that we have selected our variables of interest and converted categorical values to non-arbitrary real-values, we can continue with distance based clustering. The following visualisation is a map of all the Euclidean distances between the points.
+
+```{r distances, opts.label='fig.hugetile'}
+distance <- get_dist(heart_real)
+myPalDiv <- myPal.rangeDiv(3)
+fviz_dist(distance, show_labels = FALSE
+          , gradient = list(low = myPalDiv[1], mid = myPalDiv[2], high = myPalDiv[3]))
+```
+
+
+### K-means Clustering
+The k-means clustering method was attempted with 2, 3, and 4 cluster centers, but the best results were with just two. Recall that HDisease was not included in the creation of the real-valued data or the clustering process. Cross-tabulating the instances from the original dataset shows a "confusion matrix-like" result, indicating that the two clusters have captured the association with heart disease among the variables of interest.
+
+```{r kmeans}
+km2_clus <- kmeans(heart_real, centers = 2, iter.max = 50
+                  , nstart = 10)
+table(km2_clus$cluster, heart$HDisease)
+```
+The cluster labels are arbitrary but now we know them, we can get a full suite of diagnostics:
+
+```{r km_diag}
+cm <- confusionMatrix(factor(km2_clus$cluster, labels = c("No", "Yes")), heart$HDisease)
+cm
+```
+
+We can see that if we assigned unlabelled points to their nearest cluster centroid, we might expect an accuracy of `r cm$overall["Accuracy"]`
+
+```{r km_diag2}
+
+```
+
