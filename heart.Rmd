@@ -42,6 +42,8 @@ knit_hooks$set(output = function(x, options) {
 })
 
 par(mar = c(4,3,3,1))
+
+set.seed(142136)
 ```
 
 ```{r initial_load}
@@ -56,6 +58,7 @@ library(car)
 library(VIM)
 library(ca)
 library(factoextra)
+library(cluster)
 library(caret)
 source("HeartTheme.R")
 
@@ -417,13 +420,38 @@ table(km2_clus$cluster, heart$HDisease)
 The cluster labels are arbitrary but now we know them, we can get a full suite of diagnostics:
 
 ```{r km_diag}
-cm <- confusionMatrix(factor(km2_clus$cluster, labels = c("No", "Yes")), heart$HDisease)
+cm <- confusionMatrix(factor(km2_clus$cluster, labels = c("Yes", "No")), heart$HDisease)
 cm
+fviz_cluster(km2_clus, heart_real
+             , ellipse.type = "convex"
+             , geom = "point"
+             , ggtheme = theme_bw()
+             , palette = c(myPalDark[4], myPalDark[5]))
 ```
 
 We can see that if we assigned unlabelled points to their nearest cluster centroid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
  
 ```{r km_diag2}
-
+km2_clus$withinss / km2_clus$totss
+km2_clus$withinss / km2_clus$tot.withinss
+km2_clus$betweenss / km2_clus$totss
 ```
 
+### K-medoids Clustering
+
+```{r pam2}
+pam2_clus <- pam(heart_real, k = 2, diss = FALSE, metric = "euclidean")
+table(pam2_clus$cluster, heart$HDisease)
+```
+
+We can see from these results that the cluster id is the reverse of the previous method. It doesn't matter because the cluster id is completely arbitrary as this is unsupervised learning. Again we have a good alignment with the ground truth. Knowing the id that has associated with HDisease = Yes, it is easy to provide the appropriate labelling the the confusion matrix.
+
+```{r pam_diag}
+cm <- confusionMatrix(factor(ifelse(pam2_clus$cluster == 1, "Yes", "No")), heart$HDisease)
+cm
+fviz_cluster(pam2_clus, heart_real
+             , ellipse.type = "convex"
+             , geom = "point"
+             , ggtheme = theme_bw()
+             , palette = c(myPalDark[4], myPalDark[5]))
+```
