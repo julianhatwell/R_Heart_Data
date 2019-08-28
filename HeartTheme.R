@@ -2,6 +2,7 @@
 # a nice colour palette
 library(lattice)
 library(ggplot2)
+myLG <- "#DDDDEE"
 myPal <- c("#8DD3C7", "#B0A8B3", "#9FB5D6", "#9EC0FA", "#DB8072")
 myPalDark <- c("#4D8377", "#504853", "#3F5576", "#3E409A", "#7B2012")
 myPalContrasts <- c(myPalDark[1], myPalDark[5], myPal[2], myPal[4]
@@ -46,12 +47,25 @@ myLatticeTheme <- list(
 myLatticeStrip = strip.custom(par.strip.text = myLatticeFont)
 
 # applied to ggplot2
-myGgTheme <- theme(plot.title = element_text(colour = myPal[2], size = 10)
-                   , axis.title = element_text(colour = myPal[2], size = 10)
-                   , axis.text = element_text(colour = myPal[2], size = 10)
-                   , axis.line = element_line(colour = myPal[2], size = 0.5)
-                   , axis.ticks = element_line(colour = myPal[2], size = 0.5)
-                   , panel.border = element_rect(colour = "transparent")
-                   , legend.title = element_text(colour = myPal[2])
-                   , legend.text = element_text(colour = myPal[2]))
-
+myGgTheme <- function (base_size = 11, base_family = "", base_line_size = base_size/22, 
+          base_rect_size = base_size/22) 
+{
+  theme_grey(base_size = base_size, base_family = base_family, 
+             base_line_size = base_line_size, base_rect_size = base_rect_size) %+replace% 
+    theme(plot.title = element_text(colour = myPalDark[2], size = 12)
+          , axis.title = element_text(colour = myPalDark[2], size = 10)
+          , axis.text = element_text(colour = myPalDark[2], size = 10)
+          , axis.line = element_line(colour = myPalDark[2], size = 0.5)
+          , axis.ticks = element_line(colour = myPalDark[2], size = 0.5)
+          , panel.background = element_rect(fill = "white", 
+                                          colour = NA)
+          , panel.border = element_rect(fill = NA, colour = "transparent")
+          , panel.grid = element_line(colour = myLG)
+          , panel.grid.minor = element_line(size = rel(0.25))
+          , strip.background = element_rect(fill = myPal[2], 
+                                          colour = myLG)
+          , legend.key = element_rect(fill = "white", colour = NA)
+          , legend.title = element_text(colour = myPal[2])
+          , legend.text = element_text(colour = myPal[2])
+          , complete = TRUE)
+}
