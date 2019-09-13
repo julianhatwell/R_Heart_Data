@@ -59,6 +59,7 @@ library(VIM)
 library(ca)
 library(factoextra)
 library(cluster)
+library(clustertend)
 library(caret)
 source("HeartTheme.R")
 
@@ -69,9 +70,14 @@ heart <- read.csv("Heart.csv")
 # Analysis of the UCI Heart Data
 
 ## Introduction
-We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease). This data set is often used for demonstrating classification methods. The target variable is usually AtheroscleroticHDisease, which indicates the presence or absence of pathologies of the blood vessels that supply the heart muscle itself. We will do something slightly different here and attempt to use unsupervised methods to detect patterns in the independent variables, and then look for associations with heart disease in order to inform a clinical desision support system (CDSS). A CDSS is essentially a scoring system used by clinicians and medical practitioners to aid with diagnosis.
+We will conduct an analysis of the UCI Machine Learning Repository [heart data set](https://archive.ics.uci.edu/ml/datasets/heart+disease). This data set is often used for demonstrating classification methods. The target variable is usually AtheroscleroticHDisease, which indicates the presence or absence of pathologies of the blood vessels that supply the heart muscle itself. We will do something slightly different here and demonstrate several unsupervised methods to detect associations and clusters using just the independent variables. We will show the link between clustering and dimension reduction by demonstrating that cluster membership is an accurate indicator of heart disease.
 
-## Analytic Strategy
+### Research Questions
+
+1. Are there patterns or clusters among the independent variables?
+1. If so, is cluster membership associated with the presence of heart disease?
+
+### Analytic Strategy
 We will proceed in two phases:
 
 1. An initial exploratory analysis
@@ -81,7 +87,7 @@ We will proceed in two phases:
     1. Various matrix decomposition methods, including PCA, Correspondence Analysis and Exploratory Factor Analysis
     1. Clustering methods, including hierarchical and distance based methods.
 
-We will conclude by developing heuristics (rules of thumb) based on the earlier results to aid with medical diagnostics
+<!-- We will conclude by developing heuristics (rules of thumb) based on the earlier results to aid with medical diagnostics -->
 
 ## Exploratory Analysis
 The data dictionary provides the following information:
@@ -212,7 +218,7 @@ summary(heart)
 ```
 
 ### Bivariate Distributions
-We would now like to determine which variables might be good predictors of atherosclerotic heart disease and which features may be interacting.
+We would now like to determine which variables might be good predictors of atherosclerotic heart disease and which features may be interacting. A simple bivariate correlation analysis is followed by a scatterplot matrix conditioned on each level of HDisease.
 
 ```{r corrplotting, opts.label='fig.bigtile'}
 corrplot(cor(heart[num_vars]), order="AOE", type="upper"
@@ -249,6 +255,8 @@ splom(~heart[num_vars] | HDisease
 ```
 
 Careful inspection of the splom shows a clear elevation of Oldpeak in the HDisease = Yes group. There is a potentially interesting interaction between Age and MaxHR: Specifically, MaxHR is more correlated with Age in the HDisease = No group, whereas MaxHR is slightly lower whatever the Age in the HDisease = Yes group. The HDisease = Yes group are formed from a narrower Age band, however. The remaining continuous variables may be less informative.
+
+We now generate a boxplot for each of the five continuous variables, conditioned on each of the factor variables.
 
 ```{r boxplots, opts.label='fig.wideX'}
 cols <- myPal.rangeDiv(5)
@@ -298,7 +306,7 @@ mosaic(with(heart, table(HDisease, Slope, Ca, Thal))
 
 In this four way analysis, we can see that downward slope is most associated with the HDisease = No group and level slope for HDisease = Yes. Similarly, one or more arteries visible under fluoroscopy (Ca) are most strongly associated with HDisease = Yes. A third order interaction indicates that a combination of level Slope and reversible Thal is very strongly associated with HDisease = Yes, with fixed Thal also being strongly indicative.
 
-## Unuspervised Learning
+## Unuspervised Learning Methods
 We continue with a more advanced exploration of this data set using various clustering techniques
 
 ### PCA
@@ -320,7 +328,7 @@ biplot(heart_pca
 ```
 
 ### Multiple Correspondence Analysis
-Multiple correspondence analysis is a dimension reduction and clustering analysis for categorical counts. The relationships among several or many categorical variables can be mapped in two dimensions, giving fairly intiuitive results. The most important benefit is that categorical variables are implicitly recoded into non-abritrary numeric values. This makes them available to use in distance-based methods, such as k-means or hierarchical clustering.
+Multiple correspondence analysis is a dimension reduction and clustering analysis for categorical counts. The relationships among several or many categorical variables can be mapped in two dimensions, giving fairly intiuitive results. The most important benefit is that categorical variables are implicitly recoded into non-abritrary numeric values. This makes them available to use in any methods that only accept real-valued inputs, such as distance-based methods like k-means or hierarchical clustering.
 
 ```{r mca1, output.lines=10, opts.label='fig.relaxed'}
 heart_mca <- mjca(heart[cat_vars])
@@ -343,7 +351,7 @@ plot(heart_mca, map = "symbiplot"
      , col = c(myPalDark[5], myPalDark[4]))
 ```
 
-We are not displaying the arrows here because it is hard enough to read the crowded labels. The the clusters are very pronounced and we can identify a handful of less informative attributes. For example, Thal=fixed and ChestPain=typical represent small minorities in the way these variables are distributed. They carry less information or more uncertainty as a result.
+We are not displaying the arrows here because it is hard enough to read the crowded labels. The the clusters are very pronounced and we can identify a handful of less informative attributes. For example, Thal=fixed and ChestPain=typical represent small minorities in the way these variables are distributed.
 
 We can augment this analysis by discretizing the numeric variables and including them. This will be done by binning into low and high levels.
 
@@ -408,50 +416,43 @@ fviz_dist(distance, show_labels = FALSE
           , gradient = list(low = myPalDiv[1], mid = myPalDiv[2], high = myPalDiv[3]))
 ```
 
+This visualisation provides a useful confirmation of the clustering tendency in this data. We can also compute the [Hopkins statistic](https://en.wikipedia.org/wiki/Hopkins_statistic) *H*, which tests the null hypothesis that the data has come from a uniform distribution and is distributed as $H \sim \mathit{Beta}(n, n)$ where *n* is the number of samples used to calculate the statistic. A value of *n* = 5-10% of the dataset is [recommended](https://arxiv.org/pdf/1808.08317.pdf).
 
-### K-means Clustering
-The k-means clustering method was attempted with 2, 3, and 4 cluster centers, but the best results were with just two. Recall that HDisease was not included in the creation of the real-valued data or the clustering process. Cross-tabulating the instances from the original dataset shows a "confusion matrix-like" result, indicating that the two clusters have captured the association with heart disease among the variables of interest.
-
-```{r kmeans}
-km2_clus <- kmeans(heart_real, centers = 2, iter.max = 50
-                  , nstart = 10)
-table(km2_clus$cluster, heart$HDisease)
-```
-The cluster labels are arbitrary but now we know them, we can get a full suite of diagnostics:
-
-```{r km_diag}
-cm <- confusionMatrix(factor(km2_clus$cluster, labels = c("Yes", "No")), heart$HDisease)
-cm
-fviz_cluster(km2_clus, heart_real
-             , ellipse.type = "convex"
-             , geom = "point"
-             , ggtheme = theme_bw()
-             , palette = c(myPalDark[4], myPalDark[5]))
-```
-
-We can see that if we assigned unlabelled points to their nearest cluster centroid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
- 
-```{r km_diag2}
-km2_clus$withinss / km2_clus$totss
-km2_clus$withinss / km2_clus$tot.withinss
-km2_clus$betweenss / km2_clus$totss
+```{r hopstat, echo=TRUE}
+n <- nrow(heart_real)/10
+H <- hopkins(heart_real, n = n, header = TRUE)$H
+H < qbeta(0.05, n, n) # significant result if TRUE
 ```
 
 ### K-medoids Clustering
+K-medoids searches for k archetypal or representative instances, called medoids that act as the cluster centres. Each non-medoid instance is assigned to its nearest medoid. The algorithm proceeds by swapping medoid and non-medoid points, accepting a swap that decreases the sum of a dissimilarity function. K-medoids is less sensitive to outliers than the classic K-means method, so is often favoured. Another reason to prefer K-medoids is that the number k can be estimated using the silhouette method. From the visual inspection and the knowledge we have already that these variables tend to be associated with heart disease, we could assume two clusters is the correct number, but it's still worth checking.
+
+Here we run the silhouette method to determine the best number for k:
+
+```{r pamsils, opts.label='fig.wideX'}
+fviz_nbclust(heart_real, pam, method = "silhouette"
+             , k.max = 5, linecolor = myPalDark[4]) +
+  myGgTheme()
+```
+
+Then we run the clustering with k=2:
 
 ```{r pam2}
 pam2_clus <- pam(heart_real, k = 2, diss = FALSE, metric = "euclidean")
+pam2_clus$medoids # translate back
 table(pam2_clus$cluster, heart$HDisease)
 ```
 
-We can see from these results that the cluster id is the reverse of the previous method. It doesn't matter because the cluster id is completely arbitrary as this is unsupervised learning. Again we have a good alignment with the ground truth. Knowing the id that has associated with HDisease = Yes, it is easy to provide the appropriate labelling the the confusion matrix.
+Recall that HDisease was not included in the creation of the real-valued data or the clustering process. Cross-tabulating the instances from the original dataset shows a "confusion matrix-like" result, indicating that the two clusters have captured the association with heart disease among the variables of interest. The cluster labels are arbitrary in this unsupervised learning process. We can set the appropriate label to the cluster id and get a full suite of diagnostics:
 
-```{r pam_diag}
+```{r pam_diag, opts.label='fig.relaxed'}
 cm <- confusionMatrix(factor(ifelse(pam2_clus$cluster == 1, "Yes", "No")), heart$HDisease)
 cm
 fviz_cluster(pam2_clus, heart_real
              , ellipse.type = "convex"
              , geom = "point"
-             , ggtheme = theme_bw()
-             , palette = c(myPalDark[4], myPalDark[5]))
+             , palette = c(myPalDark[4], myPalDark[5])) +
+  myGgTheme()
 ```
+
+We can see that if we assigned unlabelled points to their nearest cluster medoid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
