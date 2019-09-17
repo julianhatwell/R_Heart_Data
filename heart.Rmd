@@ -61,6 +61,7 @@ library(factoextra)
 library(cluster)
 library(clustertend)
 library(caret)
+library(ape)
 source("HeartTheme.R")
 
 # load data
@@ -455,4 +456,40 @@ fviz_cluster(pam2_clus, heart_real
   myGgTheme()
 ```
 
-We can see that if we assigned unlabelled points to their nearest cluster medoid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
+We can see that if we assigned new, unlabelled points to their nearest cluster medoid, we might expect an accuracy of around `r round(cm$overall["Accuracy"], 2)`
+
+## Hierarchical Clustering
+
+We can do something similar with hierarchical clustering. After some experimentation with different clustering methods, the "Complete" method was chosen as it produced two distinct clusters with similar numbers of members.
+
+```{r hclus}
+hclus <- hclust(dist(heart_real)
+                        , method="complete")
+num_clus <- 2
+
+cm <- confusionMatrix(factor(ifelse(cutree(hclus, num_clus) == 1, "Yes", "No")), heart$HDisease)
+cm
+```
+
+Again, we can speculate on the accuracy we would get on prediction using just the cluster membership. This yields a slightly lower overall accuracy, but an increased specificity, or True Positive Rate, which might be more suitable for a diagnostic tool.
+
+We can colour the leaves of these dendrograms using any factor variable. This provides a visual inspection of how the factor is distributed among the clusters, starting with HDisease. Again, recall that this "target variable" was not used in the clustering algorithm yet we can see that it is well separated into the two clusters. Note, the colours are arbitrary. What is interesting is how they divide up into prevalent groupings between the two clusters.
+
+```{r hclus_plots, opts.label='fig.wide'}
+hclusPlot <- function(x, n, df, colourBy) {
+
+  labelColours <- myPalContrasts[factor(df[[colourBy]])]
+
+  # phylogenic tree plot
+  plot(as.phylo(x)
+     , direction = "downwards"
+     , tip.color = myPalContrasts[factor(df[[colourBy]])]
+     , main = paste(x$method, "method\nleaf colours by" , colourBy))
+  rect.hclust(x, k=n, border = "red")
+}
+
+for (nm in names(heart_real)[!names(heart_real) %in% c("Age", "MaxHR")]) {
+  hclusPlot(hclus, num_clus, heart, nm)
+}
+```
+
