@@ -27,6 +27,7 @@ heart <- read.csv("Heart.csv")
 \documentclass{article}
 
 \begin{document}
+\SweaveOpts{concordance=TRUE}
 
 \title{Data Analysis Module Assignment}
 \author{Julian Hatwell}
